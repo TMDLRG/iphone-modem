@@ -23,14 +23,29 @@ foreach ($id in 'Apple.iTunes', 'Apple.AppleMobileDeviceSupport', 'Apple.iCloud'
     Write-Host ''
     Write-Host "=== $id ===" -ForegroundColor Cyan
     winget install --id $id -e --source winget --silent --accept-package-agreements --accept-source-agreements
-    Write-Host "$id finished with exit code $LASTEXITCODE"
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "$id installed." -ForegroundColor Green
+    } elseif ($LASTEXITCODE -eq -1978335189) {
+        Write-Host "$id is already installed and up to date." -ForegroundColor Green   # 0x8A15002B: no applicable upgrade
+    } else {
+        Write-Host "$id finished with exit code $LASTEXITCODE (see the winget output above)." -ForegroundColor Yellow
+    }
+}
+
+# Sideloadly installs per user (under %LOCALAPPDATA%), not into Program Files.
+function Find-Sideloadly {
+    foreach ($dir in @((Join-Path $env:LOCALAPPDATA 'Sideloadly'), (Join-Path $env:ProgramFiles 'Sideloadly'))) {
+        $candidate = Join-Path $dir 'sideloadly.exe'
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
 }
 
 Write-Host ''
 Write-Host '=== Sideloadly ===' -ForegroundColor Cyan
-$sideloadlyExe = Join-Path $env:ProgramFiles 'Sideloadly\sideloadly.exe'
-if (Test-Path $sideloadlyExe) {
-    Write-Host 'Sideloadly is already installed.'
+$sideloadlyExe = Find-Sideloadly
+if ($sideloadlyExe) {
+    Write-Host "Sideloadly is already installed ($sideloadlyExe)."
 } else {
     if (-not $SideloadlyInstaller) {
         $SideloadlyInstaller = Join-Path $env:TEMP 'SideloadlySetup64.exe'
@@ -57,7 +72,12 @@ if ($service) {
 } else {
     Write-Host 'Apple Mobile Device Service was not found.' -ForegroundColor Yellow
 }
-Write-Host ("Sideloadly installed: " + (Test-Path $sideloadlyExe))
+$sideloadlyExe = Find-Sideloadly
+if ($sideloadlyExe) {
+    Write-Host "Sideloadly installed: $sideloadlyExe" -ForegroundColor Green
+} else {
+    Write-Host 'Sideloadly was not found after installation.' -ForegroundColor Yellow
+}
 
 Stop-Transcript | Out-Null
 Write-Host ''

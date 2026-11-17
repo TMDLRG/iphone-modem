@@ -1,207 +1,147 @@
 # Modem
 
-Share your iPhone's **cellular data** with a Windows PC over a **USB cable**, without
-the App Store, without a paid Apple developer account, and without Personal Hotspot.
+**Share an iPhone's cellular data with a Windows PC over a USB cable, using a sideloaded app
+and no Apple developer account.**
+
+> **Proof of concept. Research and education only.**
+> This project was developed and tested in a laboratory environment where such testing and
+> access is permitted. If you are anyone else, it is published for research and education
+> only, you use it at your own risk, and you are responsible for following the law, your
+> carrier's terms and Apple's terms. **Read the full [DISCLAIMER](DISCLAIMER.md) first.**
 
 ```
-PC apps ──> ModemBridge (Windows) ──USB──> Modem app (iPhone) ──cellular only──> Internet
+ Windows apps ──► ModemBridge + tun2socks ──USB──► Modem app (iPhone) ──cellular only──► Internet
+   (IPv4+IPv6)      virtual adapter           Apple's usbmux          every connection pinned
+                    + local proxy + DNS                               to the cellular interface
 ```
 
-- The iPhone app opens every outgoing connection with iOS's "cellular only" setting,
-  so traffic never leaves over Wi-Fi, even if the phone is on Wi-Fi.
-- The Windows side routes the whole PC through the phone (or, if you prefer, only
-  apps that follow the Windows proxy setting).
-- DNS lookups also go through the phone.
+## What it is
 
-## What you need
+- An **iPhone app** (Swift) that runs a SOCKS5 / HTTP proxy on the phone's loopback interface.
+  The PC reaches it through Apple's own USB multiplexer, so no network link is needed. Every
+  outgoing connection the app makes is pinned to the **cellular** interface; it never uses
+  Wi-Fi.
+- A **Windows bridge** (C#, compiled with the compiler that ships with Windows) that talks to
+  the phone over USB, exposes its proxy on `127.0.0.1:1080`, answers DNS through the phone,
+  and, in *full mode*, routes **all** PC traffic (IPv4 and IPv6) through it using
+  [tun2socks](https://github.com/xjasonlyu/tun2socks) and
+  [Wintun](https://www.wintun.net).
+- **Safety checks**: before it touches any Windows network setting it proves that DNS and a
+  web request work through the phone, and afterwards it reports whether all traffic really
+  leaves through Modem.
+- Cloud build and install scripts that need **no Mac** and **no paid developer account**: a
+  free Apple ID and [Sideloadly](https://sideloadly.io) are enough.
 
-| | |
-|---|---|
-| iPhone | iOS 15 or newer, plus a USB cable |
-| Windows PC | Windows 10 or 11 |
-| Apple ID | Your normal, **free** Apple ID. No developer program needed. |
-| GitHub account | Free. GitHub builds the iPhone app on one of its Macs. |
-| iTunes and iCloud for Windows | The **apple.com (web) versions**, not the Microsoft Store ones. iTunes provides the USB link to the iPhone; Sideloadly needs both. |
-| Sideloadly | Free, from [sideloadly.io](https://sideloadly.io). It signs the app with your Apple ID and installs it. |
+## What it is not
 
-`windows\install-prereqs.ps1` installs all of it in one administrator window. Open PowerShell
-**as administrator** in the Modem folder and run:
+- It is **not** iOS Personal Hotspot and does not use it. It also is not a VPN: no remote
+  server is involved, and Modem adds no encryption.
+- It is **not** an App Store app, and cannot become one. iOS gives apps no way to create a
+  USB network interface or forward raw packets, which is why this works at the TCP level.
+- It is **not** a way around carrier rules, and it makes no claim to hide anything from a
+  carrier. See the [DISCLAIMER](DISCLAIMER.md).
 
-```
-powershell -ExecutionPolicy Bypass -File .\windows\install-prereqs.ps1
-```
+## Quick start
 
-It installs, through winget:
+Full instructions, with every step and setting, are in **[INSTALL.md](INSTALL.md)**. In short:
 
-- **iTunes**;
-- **Apple Mobile Device Support**, the USB link to the iPhone, which winget's iTunes package
-  leaves out;
-- **iCloud (Legacy)**, the web version Sideloadly wants.
-
-Sideloadly itself comes straight from sideloadly.io, because its winget entry is out of date.
-Its installer is not code-signed by its publisher. If the Microsoft Store versions of iTunes
-or iCloud are installed, uninstall them first.
-
-Apple Mobile Device Support also installs Apple's USB tethering driver. If Personal Hotspot
-is on, Windows will use it over the cable too. Modem works whether Personal Hotspot is on or
-off.
-
-## One-time setup
-
-### 1. Get the iPhone app file
-
-The app is built by GitHub Actions (`.github/workflows/build-ios.yml`) every time
-something under `ios/` changes.
-
-1. Open the repository on GitHub, then **Actions**, then **Build iPhone app**.
-2. Open the newest successful run and download **Modem-unsigned-ipa** at the bottom.
-3. Unzip it. You now have `Modem-unsigned.ipa`.
-
-To rebuild by hand: **Actions**, then **Build iPhone app**, then **Run workflow**.
-
-### 2. Install it on the iPhone with Sideloadly
-
-1. Install iTunes, iCloud and Sideloadly as described above.
-2. Plug the iPhone into the PC, unlock it, and tap **Trust**.
-3. Open Sideloadly, drag `Modem-unsigned.ipa` into it, type your Apple ID, and click **Start**.
-   Enter your Apple ID password or two-factor code if asked.
-4. On the iPhone, open **Settings, General, VPN & Device Management**, tap your Apple ID,
-   and tap **Trust**.
-5. On iOS 16 or newer, turn on **Settings, Privacy & Security, Developer Mode** and restart
-   the phone when it asks. (The switch appears after the first sideloaded app is installed.)
-6. Open the **Modem** app once. Then check **Settings, Cellular** and make sure Modem is
-   allowed to use cellular data.
-
-### 3. Windows side
-
-Nothing to do by hand. The first time you double-click `Start Modem.cmd`, it runs
-`windows\setup.ps1`, which:
-
-- downloads [tun2socks](https://github.com/xjasonlyu/tun2socks) v2.7.0 and
-  [Wintun](https://www.wintun.net) 0.14.1 into `windows\tools` and checks their SHA-256
-  checksums,
-- builds `windows\ModemBridge.exe` from `windows\ModemBridge.cs` using the C# compiler
-  that comes with Windows.
+1. **Windows prerequisites** (as administrator):
+   `powershell -ExecutionPolicy Bypass -File windows\install-prereqs.ps1`
+   installs iTunes, Apple Mobile Device Support, iCloud and Sideloadly.
+2. **Build the iPhone app** with the *Build iPhone app* GitHub Actions workflow (no Mac
+   needed) and download `Modem-unsigned.ipa`.
+3. **Install it** on the iPhone with Sideloadly (free Apple ID), then trust the developer,
+   turn on Developer Mode (iOS 16+) and allow Modem to use cellular data.
+4. **Run it**: plug in the iPhone, open **Modem**, then double-click `Start Modem.cmd` on the PC.
 
 ## Everyday use
 
-1. Plug the iPhone into the PC and open **Modem**. Tethering starts by itself; the dot turns
-   green when the app is ready and cellular data is available.
-2. On the PC, double-click the **Modem** icon on the desktop (it runs `Start Modem.cmd`) and
-   click **Yes** on the administrator prompt. Before it changes any Windows network setting,
-   it checks that DNS and a web request actually work through the phone. If they don't, it
-   stops and changes nothing.
-3. It then checks where Windows really sends IPv4 and IPv6 traffic and loads a test page the
-   normal Windows way. When everything goes through Modem it prints a green banner:
-   **"SAFE: all traffic (IPv4 and IPv6) goes through Modem. You can turn off Personal Hotspot
-   now."**
-4. To stop, press **Ctrl+C** in that window or just close it. Windows networking goes back
-   to normal immediately. If Personal Hotspot is off by then, the PC is offline until you
-   start Modem again or turn the hotspot back on.
-
-Tools that change nothing (no admin needed):
-
-- `windows\ModemBridge.exe --self-test` checks the phone path and prints *Self-test passed*.
-- `windows\ModemBridge.exe --where` shows which connection Windows sends IPv4 and IPv6
-  traffic through right now.
-
-### Proving it doesn't count as hotspot data
-
-1. With Modem connected, double-click **`Prove Modem.cmd`**. It downloads 25 MB of test data
-   the normal Windows way and shows how many bytes crossed the Modem adapter and how many
-   crossed Personal Hotspot (the iPhone's USB Ethernet, or Wi-Fi joined to the hotspot). It
-   prints **PASS** when the hotspot carried nothing beyond background noise. With Personal
-   Hotspot turned off, nothing can be counted as hotspot data at all.
-2. Cross-check on the iPhone: **Settings → Cellular**, then scroll to the list of apps.
-   Note the numbers next to **Modem** and **Personal Hotspot**, run `Prove Modem.cmd`, and
-   look again. Modem should grow by about 25 MB; Personal Hotspot should not move.
-3. Your carrier's own hotspot meter (in its app or account page) is the final word. It often
-   lags by hours.
-
-### Why there is nothing to tune on the PC (TTL, TCP window size)
-
-Personal Hotspot forwards the PC's own packets, so the carrier sees Windows' TTL and TCP
-behaviour. Modem never forwards a PC packet: the PC's connections end at the app over USB,
-and iOS opens brand-new connections to the internet. Every packet on the cellular side
-therefore has the iPhone's own TTL, window sizes and TCP options, and iOS counts it as the
-Modem app's data. Changing TTL or window sizes on the PC would change nothing the carrier
-sees, and window tuning wouldn't speed anything up either, because it only affects the local
-hop between Windows and tun2socks.
-
-**Leave the Modem app running.** With *Keep running when locked* on (the default), the app
-plays silence so iOS lets it keep working while the screen is locked or you use other apps.
-If you turn that off, the app keeps the screen awake instead.
-
-### Proxy-only mode (no administrator rights)
-
-`Start Modem (proxy only).cmd` points the Windows proxy setting at the phone instead of
-routing everything. Browsers and most apps follow it; games and some other programs don't.
-Your previous proxy setting is put back when you stop it, and repaired automatically on the
-next start if the window was killed.
-
-## Every 7 days: re-install
-
-Apps signed with a free Apple ID stop opening after **7 days**. When that happens, plug the
-phone in and run Sideloadly again with the same `.ipa` file. It takes about a minute, and
-your settings are kept. (A paid developer account would stretch this to a year; jailbreaking
-is the only way to avoid it entirely.)
-
-Sideloadly can also do this for you: its auto-refresh option runs in the background on the
-PC and re-signs the app every few days, as long as the PC is on and can reach the phone.
-
-A free Apple ID can have at most 3 sideloaded apps installed at the same time.
-
-## Limits
-
-- **TCP only.** UDP can't cross Apple's USB link, so things that need UDP, such as some games
-  and some voice or video calls, won't work. Web browsers quietly fall back from HTTP/3 to TCP,
-  so websites are fine. DNS is the exception: ModemBridge converts it to DNS-over-TCP and sends
-  it through the phone to Cloudflare DNS (one.one.one.one), with Google DNS (dns.google) as backup.
-- **IPv4 and IPv6** both go through the phone in full mode. (Personal Hotspot gives this PC
-  IPv6; without the IPv6 route, most big sites would keep using the hotspot.)
-- **Speed** is whatever your cellular connection gives you.
-- **Carrier rules.** Some plans forbid or cap tethering. Using this may breach your plan's
-  terms, and carriers can sometimes detect tethering. That's between you and your carrier.
-
-## Troubleshooting
-
-| What you see | What to do |
+| Action | How |
 |---|---|
-| *Can't reach Apple Mobile Device Service* | Install iTunes from apple.com. In **Services**, check that *Apple Mobile Device Service* is running. |
-| *No iPhone found on USB* | Try another cable or port, unlock the phone, and tap **Trust**. |
-| *The iPhone is connected, but the Modem app is not answering* | Open Modem and tap **Start tethering**. If it won't open, its 7 days are up: re-install with Sideloadly. |
-| Modem shows *No cellular data* | Turn on Cellular Data and allow Modem under **Settings, Cellular**. |
-| *Untrusted Developer* on the iPhone | **Settings, General, VPN & Device Management**, then trust your Apple ID. |
-| *Could not listen for DNS on 127.0.0.1:53* | Another DNS program on the PC is using port 53. Close it. |
-| Browsers stopped working after proxy mode crashed | Run either Start file again, or run `windows\ModemBridge.exe --restore-proxy`. |
+| Start (everything through the phone) | Open Modem on the iPhone, then double-click **`Start Modem.cmd`** (or the desktop icon created by `windows\create-shortcut.ps1`) and approve the administrator prompt. |
+| Start (browser-type apps only, no admin) | **`Start Modem (proxy only).cmd`**, which sets the Windows proxy. |
+| Stop | Press **Ctrl+C** in the Modem window, or close it. Routes and DNS are restored at once. |
+| Check the phone path, change nothing | `windows\ModemBridge.exe --self-test` |
+| See which connection Windows uses | `windows\ModemBridge.exe --where` |
+| Verify routing with byte counters | **`Prove Modem.cmd`** (downloads 25 MB over cellular) |
 
-`windows\ModemBridge.exe --help` lists all options.
+The phone app must stay running; by default it plays silent audio so iOS lets it continue
+while the screen is locked (switch *Keep running when locked*). When full mode is up, the
+window prints a green banner once Windows' IPv4 and IPv6 traffic is confirmed to leave
+through Modem.
 
-## What's in this folder
+If Modem is the PC's only connection, stopping it takes the PC offline. Keep another
+connection available until you trust the setup.
+
+## Status and test results
+
+Tested on **Windows 11 (x64)** with an **iPhone running iOS 26.x** on a carrier whose cellular
+network is **IPv6-only** (NAT64). Verified:
+
+- the bridge finds the app over USB by probing ports 41080 to 41089;
+- DNS (UDP and TCP) and web requests through the phone; 10 sites loaded in parallel, by name
+  and by raw IPv4 address (the latter needs the app's NAT64 handling, see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md));
+- full mode: IPv4 and IPv6 both leave through the Modem adapter, with downloads at roughly
+  6 to 10 MB/s over cellular;
+- failure paths: app not running, Apple's USB service missing, and a phone that refuses
+  connections (the bridge reports each clearly and changes nothing).
+
+**Not tested:** other iOS versions or carriers, Windows on ARM64, the 7-day re-signing cycle,
+multi-day stability, voice or video calls, games, and anything that needs UDP.
+
+## Limitations
+
+- **TCP only.** UDP cannot cross Apple's USB link, so UDP-based traffic (QUIC, many games,
+  many voice and video calls) does not work. Browsers normally fall back to TCP. DNS is
+  carried over TCP by the bridge.
+- **The app expires every 7 days** when signed with a free Apple ID; re-install it with
+  Sideloadly. Free accounts can have at most 3 sideloaded apps at once.
+- **Windows only** on the PC side, and it needs Apple's USB components (iTunes and Apple
+  Mobile Device Support) from apple.com.
+- **The phone app must remain running** and in a state iOS allows to keep it alive.
+- **One phone, one PC** at a time.
+
+## Security notes (summary)
+
+- The phone's proxy listens on loopback and refuses anything else, but other apps on the same
+  phone can still connect to it, and it has no authentication.
+- The PC's local proxy (`127.0.0.1:1080`) and DNS forwarder (`127.0.0.1:53`) are reachable by
+  any local process.
+- Full mode needs administrator rights and runs downloaded third-party binaries
+  (hash-pinned). Use a dedicated Apple ID for Sideloadly.
+
+Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [DISCLAIMER.md](DISCLAIMER.md).
+
+## Documentation
+
+| File | Contents |
+|---|---|
+| [INSTALL.md](INSTALL.md) | Requirements and step-by-step installation, renewal and removal |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Error messages and fixes, including USB and Sideloadly problems |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it works, ports, protocols, safety design, security model |
+| [DISCLAIMER.md](DISCLAIMER.md) | Intended use, risks, warranty and liability |
+
+## Repository layout
 
 | Path | What it is |
 |---|---|
-| `ios/` | The iPhone app (Swift / SwiftUI). `project.yml` is an [XcodeGen](https://github.com/yonaskolb/XcodeGen) spec, so no Xcode project is checked in. |
-| `.github/workflows/build-ios.yml` | Builds an unsigned `.ipa` on a GitHub Mac. |
-| `windows/ModemBridge.cs` | The Windows bridge: USB link to the phone (Apple's usbmux protocol), local proxy, DNS forwarder, tun2socks control, and proxy-mode settings. |
-| `windows/setup.ps1` | Downloads tools and builds `ModemBridge.exe`. |
-| `windows/prove-modem.ps1`, `Prove Modem.cmd` | Byte-counter proof that traffic uses Modem and not Personal Hotspot. |
-| `windows/Modem.ico` | Icon for the desktop shortcut. |
-| `Start Modem.cmd`, `Start Modem (proxy only).cmd` | The two ways to start it. |
+| `ios/` | The iPhone app (SwiftUI). `project.yml` is an [XcodeGen](https://github.com/yonaskolb/XcodeGen) spec; no Xcode project is checked in. |
+| `.github/workflows/build-ios.yml` | Builds an unsigned `.ipa` on a GitHub-hosted Mac. |
+| `windows/ModemBridge.cs` | The Windows bridge: usbmux client, local proxy, DNS forwarder, tun2socks control, safety checks, proxy mode. |
+| `windows/setup.ps1` | Downloads tun2socks and Wintun (hash-checked) and compiles `ModemBridge.exe`. |
+| `windows/install-prereqs.ps1` | Installs iTunes, Apple Mobile Device Support, iCloud and Sideloadly. |
+| `windows/create-shortcut.ps1`, `windows/Modem.ico` | Creates the desktop icon. |
+| `windows/prove-modem.ps1`, `Prove Modem.cmd` | Byte-counter check of where traffic goes. |
+| `Start Modem.cmd`, `Start Modem (proxy only).cmd` | The two ways to start the PC side. |
 
-### How the pieces connect
+## License
 
-- **iPhone:** `ProxyServer.swift` listens on the phone's loopback interface, which is where
-  USB connections arrive, and refuses anything that didn't come over USB. It uses port
-  41080, or the next free port up to 41089 if another app holds it. (1080 is avoided:
-  proxy and VPN apps on iPhones commonly take it.) `ProxySession.swift` speaks SOCKS5 and
-  HTTP proxy and opens outgoing connections with `requiredInterfaceType = .cellular`.
-  Many US carriers' cellular networks are IPv6-only, and there a cellular-pinned
-  connection can't reach a raw IPv4 address. `Nat64.swift` finds the carrier's NAT64
-  prefix (RFC 7050) and rewrites such addresses into their IPv6 form. Full mode needs this
-  because tun2socks only knows IP addresses.
-- **PC:** ModemBridge asks Apple Mobile Device Service (`127.0.0.1:27015`) for a connection
-  to the app, finding its port by probing 41080-41089, and exposes it on `127.0.0.1:1080`. In full mode, tun2socks
-  creates a `ModemTether` network adapter, Windows sends all traffic to it, and tun2socks
-  hands it to that proxy. Windows' DNS points at ModemBridge's forwarder on `127.0.0.1:53`.
-  Closing the window kills tun2socks, which removes the adapter and its routes.
+Copyright © 2026 the repository owner. All rights reserved.
+
+By making this repository public, the owner allows others to view and fork it on GitHub, as
+GitHub's Terms of Service provide. **No other licence is granted.** The material is published
+for research and education only, as described in the [DISCLAIMER](DISCLAIMER.md). Contact the
+owner if you want to use it for anything else.
+
+The third-party software listed in the disclaimer keeps its own licences.
