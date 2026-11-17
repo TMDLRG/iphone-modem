@@ -1,0 +1,35 @@
+# XcodeGen spec. The cloud build runs `xcodegen generate` to turn this into
+# Modem.xcodeproj, so no Mac or hand-edited Xcode project is needed.
+name: Modem
+options:
+  bundleIdPrefix: com.celltether
+  deploymentTarget:
+    iOS: "15.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+targets:
+  Modem:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Modem
+    info:
+      path: Modem/Info.plist
+      properties:
+        CFBundleDisplayName: Modem
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        UIRequiredDeviceCapabilities: [arm64]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSLocalNetworkUsageDescription: Modem only accepts connections from the PC plugged in over USB.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.celltether.modem.k7q2
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO

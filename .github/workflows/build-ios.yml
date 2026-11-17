@@ -1,0 +1,54 @@
+# Builds the iPhone app on a GitHub-hosted Mac, unsigned. Download the
+# "Modem-unsigned-ipa" artifact from the run and install it with Sideloadly,
+# which signs it with your free Apple ID.
+name: Build iPhone app
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ios.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build (unsigned)
+        working-directory: ios
+        run: |
+          xcodebuild -version
+          xcodebuild \
+            -project Modem.xcodeproj \
+            -target Modem \
+            -configuration Release \
+            -sdk iphoneos \
+            SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA
+        working-directory: ios
+        run: |
+          rm -rf Payload
+          mkdir Payload
+          cp -R build/Release-iphoneos/Modem.app Payload/
+          zip -qry Modem-unsigned.ipa Payload
+          ls -la Modem-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Modem-unsigned-ipa
+          path: ios/Modem-unsigned.ipa
+          if-no-files-found: error
