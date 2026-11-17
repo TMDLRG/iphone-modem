@@ -1355,10 +1355,21 @@ Options:
         /// Personal Hotspot can be turned off.
         public static void Verify(bool verdict)
         {
-            IPAddress v4Source = SourceAddressFor(IPAddress.Parse("1.1.1.1"));
-            IPAddress v6Source = SourceAddressFor(IPAddress.Parse("2606:4700:4700::1111"));
-            bool v4ViaModem = v4Source != null && v4Source.Equals(IPAddress.Parse(AdapterAddress));
-            bool v6ViaModem = v6Source != null && v6Source.Equals(IPAddress.Parse(AdapterAddress6));
+            IPAddress v4Source, v6Source;
+            bool v4ViaModem, v6ViaModem;
+            // Windows needs a few seconds to activate freshly added addresses
+            // (duplicate address detection); until then it may pick another
+            // connection. Wait for it to settle before judging.
+            var deadline = DateTime.UtcNow.AddSeconds(verdict ? 30 : 0);
+            while (true)
+            {
+                v4Source = SourceAddressFor(IPAddress.Parse("1.1.1.1"));
+                v6Source = SourceAddressFor(IPAddress.Parse("2606:4700:4700::1111"));
+                v4ViaModem = IsModemAddress(v4Source);
+                v6ViaModem = IsModemAddress(v6Source);
+                if ((v4ViaModem && (v6Source == null || v6ViaModem)) || DateTime.UtcNow >= deadline) break;
+                Thread.Sleep(1000);
+            }
             bool v6Elsewhere = v6Source != null && !v6ViaModem;
 
             Log.Info("IPv4 internet traffic leaves through: " + (v4ViaModem ? "Modem (the phone app)" : DescribeSource(v4Source)));
@@ -1406,6 +1417,21 @@ Options:
             {
                 return null;
             }
+        }
+
+        /// True if `address` belongs to the ModemTether adapter (any of its addresses).
+        static bool IsModemAddress(IPAddress address)
+        {
+            if (address == null) return false;
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (!string.Equals(nic.Name, AdapterName, StringComparison.OrdinalIgnoreCase)) continue;
+                foreach (var unicast in nic.GetIPProperties().UnicastAddresses)
+                {
+                    if (new IPAddress(unicast.Address.GetAddressBytes()).Equals(address)) return true;
+                }
+            }
+            return false;
         }
 
         static string DescribeSource(IPAddress source)

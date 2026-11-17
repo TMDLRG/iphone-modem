@@ -15,3 +15,4 @@ dist/
 # Windows: downloaded tools and the compiled bridge
 windows/tools/
 windows/ModemBridge.exe
+windows/ModemBridge.old.exe

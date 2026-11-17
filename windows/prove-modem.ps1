@@ -13,10 +13,24 @@
 param([int]$Megabytes = 25)
 
 function Get-Counters([string[]]$Names) {
+    # Prefer the adapter's own statistics; fall back to Windows' TCP/IP
+    # per-interface counters (some drivers, such as Apple's USB Ethernet,
+    # don't report adapter statistics).
+    $perf = @(Get-CimInstance Win32_PerfRawData_Tcpip_NetworkInterface -ErrorAction SilentlyContinue)
     $result = @{}
     foreach ($name in $Names) {
         $stats = Get-NetAdapterStatistics -Name $name -ErrorAction SilentlyContinue
-        if ($stats) { $result[$name] = $stats }
+        if ($stats) {
+            $result[$name] = [pscustomobject]@{ ReceivedBytes = [double]$stats.ReceivedBytes; SentBytes = [double]$stats.SentBytes }
+            continue
+        }
+        $adapter = Get-NetAdapter -Name $name -IncludeHidden -ErrorAction SilentlyContinue
+        if (-not $adapter) { continue }
+        $perfName = $adapter.InterfaceDescription -replace '\(', '[' -replace '\)', ']' -replace '[#/\\]', '_'
+        $row = $perf | Where-Object { $_.Name -eq $perfName } | Select-Object -First 1
+        if ($row) {
+            $result[$name] = [pscustomobject]@{ ReceivedBytes = [double]$row.BytesReceivedPersec; SentBytes = [double]$row.BytesSentPersec }
+        }
     }
     $result
 }
@@ -69,6 +83,7 @@ Write-Host ''
 Write-Host 'Bytes that crossed each adapter during the download:' -ForegroundColor Cyan
 $modemReceived = $null
 $hotspotReceived = 0
+$hotspotUnmeasured = @()
 foreach ($name in $names) {
     $role = if ($name -eq 'ModemTether') { 'Modem (phone app over USB)' } else { 'Personal Hotspot' }
     if ($before.ContainsKey($name) -and $after.ContainsKey($name)) {
@@ -78,6 +93,7 @@ foreach ($name in $names) {
         if ($name -eq 'ModemTether') { $modemReceived = $rx } else { $hotspotReceived += $rx }
     } else {
         Write-Host ("  {0,-12} {1,-28} (no counters available)" -f $name, $role)
+        if ($name -ne 'ModemTether') { $hotspotUnmeasured += $name }
     }
 }
 
@@ -85,6 +101,8 @@ $expected = $Megabytes * 1000000
 Write-Host ''
 if ($hotspot.Count -eq 0) {
     Write-Host "PASS: Personal Hotspot isn't connected, so none of this can count as hotspot data." -ForegroundColor Green
+} elseif ($hotspotUnmeasured.Count -gt 0) {
+    Write-Host ('INCONCLUSIVE: no byte counters for ' + ($hotspotUnmeasured -join ', ') + '. Turn off Personal Hotspot and run this again.') -ForegroundColor Yellow
 } elseif ($hotspotReceived -lt $expected * 0.02) {
     Write-Host ('PASS: the hotspot adapters carried {0:N2} MB of the {1} MB download (background noise only).' -f ($hotspotReceived / 1MB), $Megabytes) -ForegroundColor Green
 } else {
@@ -93,6 +111,7 @@ if ($hotspot.Count -eq 0) {
 if ($modemReceived -ne $null -and $modemReceived -lt $expected * 0.9) {
     Write-Host 'Note: the Modem adapter counted less than the download size; its counters may be incomplete.' -ForegroundColor Yellow
 }
+Write-Host 'The Modem figure includes anything else the PC downloaded at the same time.'
 Write-Host ''
 Write-Host 'Cross-check on the iPhone: Settings > Cellular, scroll to the app list.' -ForegroundColor Cyan
 Write-Host '  "Modem" should have grown by about this download; "Personal Hotspot" should not have.'
