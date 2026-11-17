@@ -345,6 +345,39 @@ final class ProxySession {
         requestReceived = true
         stats.requestStarted()
 
+        // On IPv6-only cellular, IPv4 addresses are reachable only through the
+        // carrier's NAT64 gateway (see Nat64.swift).
+        if case .ipv4(let v4) = host, Nat64.shared.preferSynthesis, let v6 = Nat64.shared.synthesize(v4) {
+            attempt(host: .ipv6(v6), port: port, completion: completion)
+            return
+        }
+        attempt(host: host, port: port) { [weak self] error in
+            guard let self = self, !self.closed else { return }
+            if let error = error, case .ipv4(let v4) = host, Self.isNoRoute(error),
+               let v6 = Nat64.shared.synthesize(v4) {
+                self.upstream?.cancel()
+                self.upstream = nil
+                self.attempt(host: .ipv6(v6), port: port) { retryError in
+                    if retryError == nil {
+                        Nat64.shared.synthesisWorked()
+                    }
+                    completion(retryError)
+                }
+            } else {
+                completion(error)
+            }
+        }
+    }
+
+    private static func isNoRoute(_ error: NWError) -> Bool {
+        if case .posix(let code) = error {
+            return code == .ENETDOWN || code == .ENETUNREACH || code == .EHOSTUNREACH
+        }
+        return false
+    }
+
+    /// One outbound TCP connection over cellular. Reports exactly once: nil when ready, else the error.
+    private func attempt(host: NWEndpoint.Host, port: NWEndpoint.Port, completion: @escaping (NWError?) -> Void) {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
         tcp.enableKeepalive = true
@@ -366,8 +399,10 @@ final class ProxySession {
             reported = true
             completion(error)
         }
-        connection.stateUpdateHandler = { [weak self] state in
-            guard let self = self, !self.closed else { return }
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            guard let self = self, !self.closed, let connection = connection else { return }
+            // A connection replaced by a NAT64 retry must not end the session.
+            let isCurrent = self.upstream === connection
             switch state {
             case .ready:
                 report(nil)
@@ -375,9 +410,15 @@ final class ProxySession {
                 // No viable cellular path, connection refused, DNS failure...
                 report(error)
             case .failed(let error):
-                if reported { self.close() } else { report(error) }
+                if !reported {
+                    report(error)
+                } else if isCurrent {
+                    self.close()
+                }
             case .cancelled:
-                if reported { self.close() }
+                if reported && isCurrent {
+                    self.close()
+                }
             default:
                 break
             }

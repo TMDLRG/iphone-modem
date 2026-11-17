@@ -67,6 +67,7 @@ final class ProxyServer {
     private var port: UInt16 { Self.candidatePorts[portIndex] }
 
     func start() {
+        Nat64.shared.start()
         queue.async { self.startListener() }
     }
 
