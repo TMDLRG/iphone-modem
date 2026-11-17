@@ -33,6 +33,9 @@ windows\ModemBridge.exe --where        # which connection does Windows use right
 | Status: *Port NNNN is busy, trying ...* | Another app on the phone holds that port. Modem tries 41080 to 41089 by itself; the line under *Tethering on* shows the port it settled on. |
 | Cellular section: *No cellular data* | Turn on Cellular Data and make sure **Modem** is switched on under *Settings, Cellular*. |
 | *Recent events*: *Could not reach ... posix error 50 (network down)* | Raw IPv4 on an IPv6-only cellular network. Use a build that includes the NAT64 handling (`Nat64.swift`), which is in the current source. |
+| The PC loses its connection when you answer a phone call, and comes back when you open Modem | iOS suspended the app because the call interrupted its silent audio. Builds with *Keep running during calls* (location keep-alive) avoid this: re-install the current build, open Modem, and choose **Allow While Using App** in the location prompt. The line under the toggle should read *On*. See [the call keep-alive](ARCHITECTURE.md#staying-alive-during-phone-calls). |
+| *Keep running during calls* says *Location is off for Modem* | *Settings, Privacy & Security, Location Services, Modem*, choose **While Using the App**. Without it a call can still pause Modem. |
+| A blue bar or pill shows on the phone | That is iOS's background-location indicator: the call keep-alive is working. Switch off *Keep running during calls* if you don't want it. |
 
 ### The app is running but nothing loads
 

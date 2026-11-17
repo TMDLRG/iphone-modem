@@ -65,8 +65,10 @@ Full instructions, with every step and setting, are in **[INSTALL.md](INSTALL.md
 | See which connection Windows uses | `windows\ModemBridge.exe --where` |
 | Verify routing with byte counters | **`Prove Modem.cmd`** (downloads 25 MB over cellular) |
 
-The phone app must stay running; by default it plays silent audio so iOS lets it continue
-while the screen is locked (switch *Keep running when locked*). When full mode is up, the
+The phone app must stay running. By default it plays silent audio so iOS lets it continue
+while the screen is locked (switch *Keep running when locked*), and it uses a coarse,
+discarded-on-arrival location request so iOS keeps it running when you answer a phone call
+(switch *Keep running during calls*; it asks for **Allow While Using App**). When full mode is up, the
 window prints a green banner once Windows' IPv4 and IPv6 traffic is confirmed to leave
 through Modem.
 
@@ -99,7 +101,9 @@ multi-day stability, voice or video calls, games, and anything that needs UDP.
   Sideloadly. Free accounts can have at most 3 sideloaded apps at once.
 - **Windows only** on the PC side, and it needs Apple's USB components (iTunes and Apple
   Mobile Device Support) from apple.com.
-- **The phone app must remain running** and in a state iOS allows to keep it alive.
+- **The phone app must remain running** and in a state iOS allows to keep it alive. Without
+  the call keep-alive (needs the location permission), answering a phone call suspends it.
+  Carriers that cut mobile data during a voice call cut the connection regardless.
 - **One phone, one PC** at a time.
 
 ## Security notes (summary)

@@ -19,12 +19,23 @@ final class TetherController: ObservableObject {
             applyBackgroundBehaviour()
         }
     }
+    /// Stay alive through phone calls (uses iOS location services as the reason to keep running).
+    @Published var keepRunningDuringCalls: Bool {
+        didSet {
+            UserDefaults.standard.set(keepRunningDuringCalls, forKey: Self.callsKey)
+            applyBackgroundBehaviour()
+        }
+    }
+    @Published private(set) var callKeepAlive = LocationKeeper.State.off
 
     private static let backgroundKey = "keepRunningInBackground"
+    private static let callsKey = "keepRunningDuringCalls"
     private var server: ProxyServer?
     private let cellularMonitor = NWPathMonitor(requiredInterfaceType: .cellular)
     private let keeper = BackgroundKeeper()
+    private let locationKeeper = LocationKeeper()
     private var statsTimer: Timer?
+    private var ticks = 0
     private var didAutoStart = false
     private let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -34,6 +45,10 @@ final class TetherController: ObservableObject {
 
     init() {
         keepRunningInBackground = UserDefaults.standard.object(forKey: Self.backgroundKey) as? Bool ?? true
+        keepRunningDuringCalls = UserDefaults.standard.object(forKey: Self.callsKey) as? Bool ?? true
+        locationKeeper.onState = { [weak self] state in
+            Task { @MainActor [weak self] in self?.applyCallKeepAlive(state) }
+        }
         cellularMonitor.pathUpdateHandler = { [weak self] path in
             let available = path.status == .satisfied
             let constrained = path.isConstrained
@@ -112,6 +127,28 @@ final class TetherController: ObservableObject {
         if latest != stats {
             stats = latest
         }
+        // A call can end without iOS telling us, leaving the silence stopped.
+        ticks += 1
+        if ticks % 5 == 0 && keepRunningInBackground {
+            keeper.resumeIfStopped()
+        }
+    }
+
+    private func applyCallKeepAlive(_ state: LocationKeeper.State) {
+        guard state != callKeepAlive else { return }
+        callKeepAlive = state
+        switch state {
+        case .off:
+            break
+        case .asking:
+            record("Asking for location permission, used only to keep Modem running during calls")
+        case .active:
+            record("Call keep-alive on")
+        case .denied:
+            record("Location is off for Modem, so a phone call can pause it. Allow it in Settings > Modem > Location.")
+        case .unavailable:
+            record("Call keep-alive unavailable: this build lacks the location background mode")
+        }
     }
 
     private func updateCellular(available: Bool, constrained: Bool) {
@@ -136,6 +173,13 @@ final class TetherController: ObservableObject {
             // Without background audio, iOS would suspend the app when the
             // screen locks, so keep the screen on while tethering.
             UIApplication.shared.isIdleTimerDisabled = isRunning
+        }
+        // The audio above stops during a phone call; location keeps the app
+        // running through it.
+        if isRunning && keepRunningDuringCalls {
+            locationKeeper.start()
+        } else {
+            locationKeeper.stop()
         }
     }
 

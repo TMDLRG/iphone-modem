@@ -49,9 +49,15 @@ struct ContentView: View {
 
                 Section(
                     header: Text("Options"),
-                    footer: Text("Plays silent audio so iOS keeps Modem running while the screen is locked or you use other apps. If you turn this off, the screen stays on while tethering.")
+                    footer: Text("Keep running when locked plays silent audio so iOS keeps Modem running while the screen is locked or you use other apps; if you turn it off, the screen stays on while tethering. A phone call interrupts that audio, so Keep running during calls also uses iOS location services as a reason to stay alive. It asks for the lowest-accuracy location and throws away every location it receives; nothing is stored or sent.")
                 ) {
                     Toggle("Keep running when locked", isOn: $controller.keepRunningInBackground)
+                    Toggle("Keep running during calls", isOn: $controller.keepRunningDuringCalls)
+                    if controller.keepRunningDuringCalls {
+                        Text(callKeepAliveText)
+                            .font(.footnote)
+                            .foregroundColor(controller.callKeepAlive == .active ? .secondary : .orange)
+                    }
                 }
 
                 Section(header: Text("On the PC")) {
@@ -85,6 +91,21 @@ struct ContentView: View {
         if !controller.isRunning { return .gray }
         if controller.serverHealthy && controller.cellularAvailable { return .green }
         return .orange
+    }
+
+    private var callKeepAliveText: String {
+        switch controller.callKeepAlive {
+        case .off:
+            return controller.isRunning ? "Starting..." : "Starts with tethering."
+        case .asking:
+            return "Choose Allow While Using App in the location prompt."
+        case .active:
+            return "On. Modem keeps running when you answer a call."
+        case .denied:
+            return "Location is off for Modem, so a call can pause it. Turn it on in Settings > Modem > Location."
+        case .unavailable:
+            return "Not available in this build."
+        }
     }
 
     private func row(_ title: String, _ value: String) -> some View {

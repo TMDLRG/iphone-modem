@@ -2,7 +2,8 @@ import AVFoundation
 
 /// Keeps the app running in the background by playing silence. iOS suspends
 /// ordinary apps a few seconds after they leave the screen, which would cut the
-/// PC off; an app with an active audio session keeps running.
+/// PC off; an app with an active audio session keeps running. A phone call
+/// interrupts this audio, which is why `LocationKeeper` exists as well.
 final class BackgroundKeeper {
     private var player: AVAudioPlayer?
     private var observers: [NSObjectProtocol] = []
@@ -44,6 +45,20 @@ final class BackgroundKeeper {
             return nil
         } catch {
             return "Background mode unavailable: \(error.localizedDescription)"
+        }
+    }
+
+    /// Quietly restarts the silence if it has stopped (a call that has ended, for
+    /// example, when iOS didn't send the "ended" event). While a call is still in
+    /// progress iOS refuses to activate the session; that is ignored and the
+    /// caller simply tries again later.
+    func resumeIfStopped() {
+        guard let current = player, !current.isPlaying else { return }
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+            current.play()
+        } catch {
+            // Still interrupted.
         }
     }
 

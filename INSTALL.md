@@ -102,6 +102,13 @@ If Apple rejects the app's identifier as already taken, change `PRODUCT_BUNDLE_I
    **Ready for the PC over USB (port 41080)**. If another app on the phone already uses
    port 41080, Modem picks the next free port up to 41089 and lists the change under *Recent
    events*; the PC side finds it automatically.
+5. **Location, so phone calls don't cut the connection:** the first time Modem opens it asks
+   for location access. Choose **Allow While Using App**. Modem uses it only as a reason for
+   iOS to keep it running when you answer a call (it asks for the coarsest location and
+   discards every location it receives), and the line under *Keep running during calls* should
+   then read *On*. Without it, answering a call suspends Modem and the PC loses its
+   connection until you open Modem again. You can refuse or switch the option off; everything
+   else works.
 
 If Windows no longer sees the iPhone after the Developer Mode restart, unplug and re-plug the
 cable and, if that doesn't help, restart the PC (see the troubleshooting guide).

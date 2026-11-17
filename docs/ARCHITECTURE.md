@@ -33,11 +33,34 @@ is also why only TCP is supported.
 | `ProxyServer.swift` | Listens on the phone's **loopback** interface. Tries ports **41080 to 41089** in order and moves on if one is in use ("address in use"). Refuses any client that is not on loopback (usbmux-forwarded connections arrive from loopback). Counts traffic. |
 | `ProxySession.swift` | One client connection. Speaks **SOCKS5** (no auth, `CONNECT` only) and **HTTP proxy** (`CONNECT` tunnels and plain `http://` requests, rewritten to origin form with `Connection: close`). Opens upstream connections with `requiredInterfaceType = .cellular` and Wi-Fi, wired and loopback prohibited. Relays both ways with flow control and half-close handling. Timeouts: 30 s for a request to arrive, 30 s to connect, 60 s idle once one side has closed. |
 | `Nat64.swift` | Makes IPv4 literals work on IPv6-only cellular networks (see below). |
-| `BackgroundKeeper.swift` | Plays a silent, looping audio file so iOS keeps the app running when the screen locks (`UIBackgroundModes: audio`). Resumes after calls, alarms and audio-service resets. |
-| `TetherController.swift` | App state; watches cellular availability with `NWPathMonitor`; starts and stops the proxy and the background audio. |
-| `ContentView.swift`, `ModemApp.swift` | The UI: status, cellular state, traffic counters, the *Keep running when locked* option and recent events. |
+| `BackgroundKeeper.swift` | Plays a silent, looping audio file so iOS keeps the app running when the screen locks (`UIBackgroundModes: audio`). Restarts it after calls, alarms and audio-service resets, and every 5 seconds if it is found stopped. |
+| `LocationKeeper.swift` | Keeps the app running **through phone calls** (`UIBackgroundModes: location`); see below. |
+| `TetherController.swift` | App state; watches cellular availability with `NWPathMonitor`; starts and stops the proxy and both keep-alives. |
+| `ContentView.swift`, `ModemApp.swift` | The UI: status, cellular state, traffic counters, the *Keep running when locked* and *Keep running during calls* options and recent events. |
 
-The app needs no special entitlement, which is why a free Apple ID can sign it.
+The app needs no special entitlement, which is why a free Apple ID can sign it. (The location
+permission below is an ordinary run-time prompt, not an entitlement.)
+
+#### Staying alive during phone calls
+
+Silent audio keeps the app running with the screen locked, but answering a phone call takes
+over the audio session: the silence stops, iOS sees an app with nothing playing, and it
+**suspends Modem a few seconds after the Phone screen covers it**. The PC's connection then
+stalls until Modem is opened again (which also restarts the audio). Observed in testing.
+
+Background location is not interrupted by calls, and iOS keeps an app with active location
+updates running. `LocationKeeper` therefore starts `CLLocationManager` updates at the
+coarsest accuracy (3 km, cell and Wi-Fi positioning, no GPS), with
+`pausesLocationUpdatesAutomatically = false` so iOS does not pause them while the phone sits
+still. The app **discards every location it receives**: the delegate method that would
+receive them is empty, nothing is stored or sent. It needs the **While Using the App**
+permission, shows the blue location indicator while active, and is switched by *Keep running
+during calls* in the app (on by default). It only works if the permission was granted and
+only while the app was started in the foreground, so open Modem once after installing.
+
+Not covered: carriers or plans where mobile data stops during a voice call (older networks
+without simultaneous voice and data). There the data path itself goes away, whatever the app
+does.
 
 ### Windows bridge (`windows/ModemBridge.cs`, C# 5)
 
@@ -115,6 +138,7 @@ The bridge's DNS servers are given by name for the same reason.
 | Privileges | Full mode runs elevated to create the adapter and routes. |
 | Third-party code | tun2socks and Wintun (hash-pinned), Apple's drivers, Sideloadly (unsigned installer). |
 | Credentials | Sideloadly sends the Apple ID credentials to Apple; use a dedicated account. |
+| Location | The app requests location (While Using) only as a keep-alive for phone calls and discards every location it receives. iOS shows the blue location indicator while it is on, and the permission can be refused or the option switched off. |
 | Visibility | The destinations, volumes and timing of traffic remain visible to the carrier and the network. Nothing here is designed to hide them. |
 
 ### Why there is no PC-side TCP/IP tuning

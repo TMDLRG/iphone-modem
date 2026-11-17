@@ -23,10 +23,11 @@ targets:
         CFBundleVersion: "1"
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
-        UIBackgroundModes: [audio]
+        UIBackgroundModes: [audio, location]
         UIRequiredDeviceCapabilities: [arm64]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSLocalNetworkUsageDescription: Modem only accepts connections from the PC plugged in over USB.
+        NSLocationWhenInUseUsageDescription: Modem uses location only as a way to keep running while you answer phone calls. It discards every location it receives; none is stored or sent.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.celltether.modem.k7q2
