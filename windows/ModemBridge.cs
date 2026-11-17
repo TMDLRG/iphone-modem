@@ -47,6 +47,7 @@ namespace ModemBridge
         public bool Elevated;
         public bool RestoreProxy;
         public bool SelfTest;                   // check the phone path, change nothing, exit
+        public bool Where;                      // show which connection Windows uses, exit
     }
 
     static class Program
@@ -70,6 +71,12 @@ namespace ModemBridge
                 Console.Error.WriteLine(ex.Message);
                 PrintUsage();
                 return 2;
+            }
+
+            if (Opt.Where)
+            {
+                Tunnel.Verify(false);
+                return 0;
             }
 
             if (Opt.RestoreProxy)
@@ -176,7 +183,8 @@ namespace ModemBridge
             if (Opt.Mode == "full")
             {
                 Tunnel.Start(Opt);
-                Log.Ok("All PC traffic now goes out through the iPhone's cellular data.");
+                Log.Ok("Routing is set up. Checking where traffic actually goes...");
+                Tunnel.Verify(true);
             }
             else if (Opt.Mode == "proxy")
             {
@@ -369,6 +377,7 @@ namespace ModemBridge
                     case "--elevated": o.Elevated = true; break;
                     case "--restore-proxy": o.RestoreProxy = true; break;
                     case "--self-test": o.SelfTest = true; break;
+                    case "--where": o.Where = true; break;
                     case "-h":
                     case "--help":
                     case "/?":
@@ -435,6 +444,8 @@ Options:
   --tun2socks PATH     Path to tun2socks.exe (default tools\tun2socks.exe)
   --self-test          Check DNS and a web request through the phone, change
                        nothing, and exit (0 = works)
+  --where              Show which connection Windows sends internet traffic
+                       through right now, change nothing, and exit
   --restore-proxy      Put back the Windows proxy setting saved by proxy mode
   --no-elevate         Fail instead of asking for admin rights
 ");
@@ -1267,6 +1278,7 @@ Options:
     {
         public const string AdapterName = "ModemTether";
         const string AdapterAddress = "198.18.77.1";
+        const string AdapterAddress6 = "fd77:7e7e::1"; // private (ULA) address for the tunnel's IPv6 side
         static Process process;
 
         public static bool HasExited
@@ -1320,8 +1332,122 @@ Options:
             Netsh("interface ipv4 set dnsservers name=" + name + " source=static address=127.0.0.1 register=none validate=no");
             Netsh("interface ipv4 set interface interface=" + name + " metric=1 store=active");
             Netsh("interface ipv4 add route prefix=0.0.0.0/0 interface=" + name + " nexthop=" + AdapterAddress + " metric=1 store=active");
+
+            // IPv6 too. Personal Hotspot hands this PC IPv6, and without this
+            // route most big sites (which prefer IPv6) would keep using it.
+            try
+            {
+                Netsh("interface ipv6 add address interface=" + name + " address=" + AdapterAddress6 + "/64 store=active");
+                Netsh("interface ipv6 set interface interface=" + name + " metric=1 store=active");
+                Netsh("interface ipv6 add route prefix=::/0 interface=" + name + " metric=1 store=active");
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Could not route IPv6 through the phone: " + ex.Message);
+            }
+
             string ignored;
             Exec("ipconfig", "/flushdns", out ignored);
+        }
+
+        /// Checks where Windows now sends internet traffic, then fetches a page the
+        /// normal Windows way (system DNS and routing), and says plainly whether
+        /// Personal Hotspot can be turned off.
+        public static void Verify(bool verdict)
+        {
+            IPAddress v4Source = SourceAddressFor(IPAddress.Parse("1.1.1.1"));
+            IPAddress v6Source = SourceAddressFor(IPAddress.Parse("2606:4700:4700::1111"));
+            bool v4ViaModem = v4Source != null && v4Source.Equals(IPAddress.Parse(AdapterAddress));
+            bool v6ViaModem = v6Source != null && v6Source.Equals(IPAddress.Parse(AdapterAddress6));
+            bool v6Elsewhere = v6Source != null && !v6ViaModem;
+
+            Log.Info("IPv4 internet traffic leaves through: " + (v4ViaModem ? "Modem (the phone app)" : DescribeSource(v4Source)));
+            Log.Info("IPv6 internet traffic leaves through: " + (v6Source == null ? "nothing (no IPv6 route)" : v6ViaModem ? "Modem (the phone app)" : DescribeSource(v6Source)));
+
+            string fetch = FetchTestPage();
+            if (fetch != null)
+                Log.Warn("Test page through Windows' normal network path failed: " + fetch);
+            else
+                Log.Ok("Test page loaded through Windows' normal network path.");
+
+            if (!verdict) return;
+            if (v4ViaModem && fetch == null && !v6Elsewhere)
+            {
+                Log.Ok("==============================================================");
+                Log.Ok(" SAFE: all traffic (IPv4 and IPv6) goes through Modem.");
+                Log.Ok(" You can turn off Personal Hotspot on the iPhone now.");
+                Log.Ok("==============================================================");
+            }
+            else if (v4ViaModem && fetch == null)
+            {
+                Log.Warn("Safe to turn off Personal Hotspot, but until you do, IPv6 traffic still uses it.");
+            }
+            else
+            {
+                Log.Error("NOT SAFE to turn off Personal Hotspot yet: traffic is not going through Modem.");
+                Log.Error("Close this window to undo, and check the messages above.");
+            }
+        }
+
+        /// The local address Windows would send from to reach `destination`
+        /// (a UDP "connect" picks a route without sending anything).
+        static IPAddress SourceAddressFor(IPAddress destination)
+        {
+            try
+            {
+                using (var s = new Socket(destination.AddressFamily, SocketType.Dgram, ProtocolType.Udp))
+                {
+                    s.Connect(new IPEndPoint(destination, 53));
+                    var local = ((IPEndPoint)s.LocalEndPoint).Address;
+                    return new IPAddress(local.GetAddressBytes()); // drop any scope id for comparison
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        static string DescribeSource(IPAddress source)
+        {
+            if (source == null) return "unknown";
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                foreach (var unicast in nic.GetIPProperties().UnicastAddresses)
+                {
+                    if (new IPAddress(unicast.Address.GetAddressBytes()).Equals(source))
+                        return nic.Name + " (" + nic.Description + ")";
+                }
+            }
+            return source.ToString();
+        }
+
+        static string FetchTestPage()
+        {
+            const string host = "www.msftconnecttest.com";
+            try
+            {
+                using (var client = new TcpClient())
+                {
+                    var connect = client.ConnectAsync(host, 80);
+                    if (!connect.Wait(20000)) return "timed out connecting to " + host;
+                    var stream = client.GetStream();
+                    stream.ReadTimeout = 15000;
+                    byte[] request = Encoding.ASCII.GetBytes("GET /connecttest.txt HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n");
+                    stream.Write(request, 0, request.Length);
+                    var buffer = new byte[256];
+                    int n = stream.Read(buffer, 0, buffer.Length);
+                    string head = Encoding.ASCII.GetString(buffer, 0, Math.Max(n, 0));
+                    return head.StartsWith("HTTP/1.1 200", StringComparison.Ordinal) || head.StartsWith("HTTP/1.0 200", StringComparison.Ordinal)
+                        ? null
+                        : "unexpected reply: " + head.Split('\n')[0].Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                var inner = ex is AggregateException && ex.InnerException != null ? ex.InnerException : ex;
+                return inner.Message;
+            }
         }
 
         public static void Stop()

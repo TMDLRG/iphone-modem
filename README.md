@@ -87,15 +87,46 @@ Nothing to do by hand. The first time you double-click `Start Modem.cmd`, it run
 
 1. Plug the iPhone into the PC and open **Modem**. Tethering starts by itself; the dot turns
    green when the app is ready and cellular data is available.
-2. On the PC, double-click **`Start Modem.cmd`** and click **Yes** on the administrator prompt.
-   Before it changes any Windows network setting, it checks that DNS and a web request
-   actually work through the phone. If they don't, it stops and changes nothing.
-3. Wait for *"All PC traffic now goes out through the iPhone's cellular data."*
+2. On the PC, double-click the **Modem** icon on the desktop (it runs `Start Modem.cmd`) and
+   click **Yes** on the administrator prompt. Before it changes any Windows network setting,
+   it checks that DNS and a web request actually work through the phone. If they don't, it
+   stops and changes nothing.
+3. It then checks where Windows really sends IPv4 and IPv6 traffic and loads a test page the
+   normal Windows way. When everything goes through Modem it prints a green banner:
+   **"SAFE: all traffic (IPv4 and IPv6) goes through Modem. You can turn off Personal Hotspot
+   now."**
 4. To stop, press **Ctrl+C** in that window or just close it. Windows networking goes back
-   to normal immediately.
+   to normal immediately. If Personal Hotspot is off by then, the PC is offline until you
+   start Modem again or turn the hotspot back on.
 
-To check the phone path without changing anything (no admin needed), run
-`windows\ModemBridge.exe --self-test`. It prints *Self-test passed* when everything works.
+Tools that change nothing (no admin needed):
+
+- `windows\ModemBridge.exe --self-test` checks the phone path and prints *Self-test passed*.
+- `windows\ModemBridge.exe --where` shows which connection Windows sends IPv4 and IPv6
+  traffic through right now.
+
+### Proving it doesn't count as hotspot data
+
+1. With Modem connected, double-click **`Prove Modem.cmd`**. It downloads 25 MB of test data
+   the normal Windows way and shows how many bytes crossed the Modem adapter and how many
+   crossed Personal Hotspot (the iPhone's USB Ethernet, or Wi-Fi joined to the hotspot). It
+   prints **PASS** when the hotspot carried nothing beyond background noise. With Personal
+   Hotspot turned off, nothing can be counted as hotspot data at all.
+2. Cross-check on the iPhone: **Settings → Cellular**, then scroll to the list of apps.
+   Note the numbers next to **Modem** and **Personal Hotspot**, run `Prove Modem.cmd`, and
+   look again. Modem should grow by about 25 MB; Personal Hotspot should not move.
+3. Your carrier's own hotspot meter (in its app or account page) is the final word. It often
+   lags by hours.
+
+### Why there is nothing to tune on the PC (TTL, TCP window size)
+
+Personal Hotspot forwards the PC's own packets, so the carrier sees Windows' TTL and TCP
+behaviour. Modem never forwards a PC packet: the PC's connections end at the app over USB,
+and iOS opens brand-new connections to the internet. Every packet on the cellular side
+therefore has the iPhone's own TTL, window sizes and TCP options, and iOS counts it as the
+Modem app's data. Changing TTL or window sizes on the PC would change nothing the carrier
+sees, and window tuning wouldn't speed anything up either, because it only affects the local
+hop between Windows and tun2socks.
 
 **Leave the Modem app running.** With *Keep running when locked* on (the default), the app
 plays silence so iOS lets it keep working while the screen is locked or you use other apps.
@@ -126,7 +157,8 @@ A free Apple ID can have at most 3 sideloaded apps installed at the same time.
   and some voice or video calls, won't work. Web browsers quietly fall back from HTTP/3 to TCP,
   so websites are fine. DNS is the exception: ModemBridge converts it to DNS-over-TCP and sends
   it through the phone to Cloudflare DNS (one.one.one.one), with Google DNS (dns.google) as backup.
-- **IPv4 on the PC side.** The phone itself can still reach IPv6 servers.
+- **IPv4 and IPv6** both go through the phone in full mode. (Personal Hotspot gives this PC
+  IPv6; without the IPv6 route, most big sites would keep using the hotspot.)
 - **Speed** is whatever your cellular connection gives you.
 - **Carrier rules.** Some plans forbid or cap tethering. Using this may breach your plan's
   terms, and carriers can sometimes detect tethering. That's between you and your carrier.
@@ -153,6 +185,8 @@ A free Apple ID can have at most 3 sideloaded apps installed at the same time.
 | `.github/workflows/build-ios.yml` | Builds an unsigned `.ipa` on a GitHub Mac. |
 | `windows/ModemBridge.cs` | The Windows bridge: USB link to the phone (Apple's usbmux protocol), local proxy, DNS forwarder, tun2socks control, and proxy-mode settings. |
 | `windows/setup.ps1` | Downloads tools and builds `ModemBridge.exe`. |
+| `windows/prove-modem.ps1`, `Prove Modem.cmd` | Byte-counter proof that traffic uses Modem and not Personal Hotspot. |
+| `windows/Modem.ico` | Icon for the desktop shortcut. |
 | `Start Modem.cmd`, `Start Modem (proxy only).cmd` | The two ways to start it. |
 
 ### How the pieces connect
