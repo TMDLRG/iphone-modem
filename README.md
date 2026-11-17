@@ -157,12 +157,13 @@ A free Apple ID can have at most 3 sideloaded apps installed at the same time.
 
 ### How the pieces connect
 
-- **iPhone:** `ProxyServer.swift` listens on port 1080 on the phone's loopback interface,
-  which is where USB connections arrive, and refuses anything that didn't come over USB.
-  `ProxySession.swift` speaks SOCKS5 and HTTP proxy and opens outgoing connections with
-  `requiredInterfaceType = .cellular`.
+- **iPhone:** `ProxyServer.swift` listens on the phone's loopback interface, which is where
+  USB connections arrive, and refuses anything that didn't come over USB. It uses port
+  41080, or the next free port up to 41089 if another app holds it. (1080 is avoided:
+  proxy and VPN apps on iPhones commonly take it.) `ProxySession.swift` speaks SOCKS5 and
+  HTTP proxy and opens outgoing connections with `requiredInterfaceType = .cellular`.
 - **PC:** ModemBridge asks Apple Mobile Device Service (`127.0.0.1:27015`) for a connection
-  to port 1080 on the phone, and exposes it on `127.0.0.1:1080`. In full mode, tun2socks
+  to the app, finding its port by probing 41080-41089, and exposes it on `127.0.0.1:1080`. In full mode, tun2socks
   creates a `ModemTether` network adapter, Windows sends all traffic to it, and tun2socks
   hands it to that proxy. Windows' DNS points at ModemBridge's forwarder on `127.0.0.1:53`.
   Closing the window kills tun2socks, which removes the adapter and its routes.

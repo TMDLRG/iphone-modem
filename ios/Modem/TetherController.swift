@@ -6,8 +6,6 @@ import UIKit
 /// the app alive while tethering.
 @MainActor
 final class TetherController: ObservableObject {
-    static let port: UInt16 = 1080
-
     @Published private(set) var isRunning = false
     @Published private(set) var serverHealthy = false
     @Published private(set) var serverStatus = "Stopped"
@@ -61,7 +59,7 @@ final class TetherController: ObservableObject {
 
     func start() {
         guard server == nil else { return }
-        let newServer = ProxyServer(port: Self.port)
+        let newServer = ProxyServer()
         newServer.onLog = { [weak self] message in
             Task { @MainActor [weak self] in self?.record(message) }
         }
@@ -77,7 +75,7 @@ final class TetherController: ObservableObject {
             Task { @MainActor [weak self] in self?.refreshStats() }
         }
         applyBackgroundBehaviour()
-        record("Tethering started on port \(Self.port)")
+        record("Tethering started")
     }
 
     func stop() {
@@ -99,9 +97,9 @@ final class TetherController: ObservableObject {
         case .starting:
             serverHealthy = false
             serverStatus = "Starting..."
-        case .ready(let loopbackOnly):
+        case .ready(let port, let loopbackOnly):
             serverHealthy = true
-            serverStatus = loopbackOnly ? "Ready for the PC over USB" : "Ready for the PC over USB (filtered)"
+            serverStatus = "Ready for the PC over USB (port \(port)" + (loopbackOnly ? ")" : ", filtered)")
         case .failed(let message):
             serverHealthy = false
             serverStatus = "Problem: \(message). Retrying..."

@@ -34,7 +34,7 @@ namespace ModemBridge
     {
         public string Mode = "full";            // full | proxy | bridge
         public int LocalPort = 1080;
-        public int PhonePort = 1080;
+        public int PhonePort;                   // 0 = find the app's port automatically
         public bool Dns;                        // DNS forwarder (always on in full mode)
         public int DnsPort = 53;
         public List<string> DnsServers = new List<string> { "1.1.1.1", "8.8.8.8" };
@@ -425,7 +425,8 @@ Modes:
 
 Options:
   --port N             Local proxy port (default 1080)
-  --phone-port N       Port the iPhone app listens on (default 1080)
+  --phone-port N       Port the iPhone app listens on (default: found
+                       automatically among 41080-41089)
   --dns                Also run the DNS forwarder (always on in full mode)
   --dns-port N         Local DNS port (default 53)
   --dns-servers a,b    DNS servers reached through the phone (default 1.1.1.1,8.8.8.8)
@@ -458,8 +459,27 @@ Options:
             this.opt = opt;
         }
 
-        /// Opens a fresh TCP stream to the app's port on the iPhone.
+        /// Ports the iPhone app may listen on, in the order it tries them
+        /// (keep in sync with ProxyServer.candidatePorts in the app).
+        static readonly int[] CandidatePorts = Enumerable.Range(41080, 10).ToArray();
+
+        readonly object portGate = new object();
+        int discoveredPort = -1;
+
+        /// The phone port in use: --phone-port if given, else found by probing.
+        public int PhonePort
+        {
+            get { return opt.PhonePort > 0 ? opt.PhonePort : Thread.VolatileRead(ref discoveredPort); }
+        }
+
+        /// Opens a fresh TCP stream to the Modem app on the iPhone.
         public Socket Open()
+        {
+            if (opt.DirectHost != null) return OpenPort(0);
+            return OpenPort(ResolvePort());
+        }
+
+        Socket OpenPort(int port)
         {
             if (opt.DirectHost != null)
             {
@@ -472,12 +492,65 @@ Options:
             int id = DeviceId(false);
             try
             {
-                return UsbMux.Connect(id, opt.PhonePort);
+                return UsbMux.Connect(id, port);
             }
             catch (UsbMuxException ex)
             {
                 if (ex.Code != UsbMuxException.BadDevice) throw;
-                return UsbMux.Connect(DeviceId(true), opt.PhonePort); // re-plugged: new device id
+                return UsbMux.Connect(DeviceId(true), port); // re-plugged: new device id
+            }
+        }
+
+        int ResolvePort()
+        {
+            if (opt.PhonePort > 0) return opt.PhonePort;
+            int known = Thread.VolatileRead(ref discoveredPort);
+            if (known > 0) return known;
+            lock (portGate)
+            {
+                if (discoveredPort > 0) return discoveredPort;
+                foreach (int candidate in CandidatePorts)
+                {
+                    if (Greets(candidate))
+                    {
+                        Thread.VolatileWrite(ref discoveredPort, candidate);
+                        Log.Info("The Modem app is listening on iPhone port " + candidate + ".");
+                        return candidate;
+                    }
+                }
+            }
+            throw new PhoneException(AppNotAnswering);
+        }
+
+        /// Forget the discovered port (the app restarted or moved).
+        void InvalidatePort()
+        {
+            if (opt.PhonePort <= 0) Thread.VolatileWrite(ref discoveredPort, -1);
+        }
+
+        /// True if a SOCKS5 server (the Modem app) answers on this phone port.
+        bool Greets(int port)
+        {
+            Socket s = null;
+            try
+            {
+                s = OpenPort(port);
+                s.ReceiveTimeout = 3000;
+                s.SendTimeout = 3000;
+                Net.SendAll(s, new byte[] { 5, 1, 0 });
+                var reply = Net.ReadExact(s, 2);
+                return reply[0] == 5 && reply[1] == 0;
+            }
+            catch (UsbMuxException ex)
+            {
+                if (ex.Code == UsbMuxException.ConnectionRefused) return false;
+                throw;
+            }
+            catch (IOException) { return false; }
+            catch (SocketException) { return false; }
+            finally
+            {
+                Net.Close(s);
             }
         }
 
@@ -519,7 +592,10 @@ Options:
                 Net.SendAll(s, new byte[] { 5, 1, 0 });
                 var reply = Net.ReadExact(s, 2);
                 if (reply[0] != 5 || reply[1] != 0)
-                    return "Something answered on the iPhone's port " + opt.PhonePort + ", but it is not the Modem app.";
+                {
+                    InvalidatePort();
+                    return "Something answered on the iPhone's port " + PhonePort + ", but it is not the Modem app.";
+                }
                 return null;
             }
             catch (Exception ex)
@@ -529,7 +605,10 @@ Options:
                 // Apple's Windows service reports the USB connection as made even
                 // when nothing listens on the phone, then closes it straight away.
                 if (opened && (ex is IOException || ex is SocketException))
+                {
+                    InvalidatePort(); // the app may have restarted on another port
                     return AppNotAnswering;
+                }
                 return Explain(ex);
             }
             finally

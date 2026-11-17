@@ -45,11 +45,15 @@ final class ProxyStats {
 final class ProxyServer {
     enum State: Equatable {
         case starting
-        case ready(loopbackOnly: Bool)
+        case ready(port: UInt16, loopbackOnly: Bool)
         case failed(String)
     }
 
-    let port: UInt16
+    /// Ports the app may listen on, in order. The PC bridge probes the same
+    /// list, so if another app on the phone holds one, the next is used.
+    /// (1080 is avoided on purpose: proxy and VPN apps commonly take it.)
+    static let candidatePorts: [UInt16] = Array(41080...41089)
+
     let stats = ProxyStats()
     var onLog: ((String) -> Void)?
     var onState: ((State) -> Void)?
@@ -59,10 +63,8 @@ final class ProxyServer {
     private var sessions: [ObjectIdentifier: ProxySession] = [:]
     private var stopped = false
     private var loopbackOnly = true
-
-    init(port: UInt16) {
-        self.port = port
-    }
+    private var portIndex = 0
+    private var port: UInt16 { Self.candidatePorts[portIndex] }
 
     func start() {
         queue.async { self.startListener() }
@@ -103,7 +105,8 @@ final class ProxyServer {
             guard let self = self, let current = newListener, self.listener === current else { return }
             switch state {
             case .ready:
-                self.onState?(.ready(loopbackOnly: self.loopbackOnly))
+                self.log("Listening for the PC on port \(self.port)")
+                self.onState?(.ready(port: self.port, loopbackOnly: self.loopbackOnly))
             case .failed(let error), .waiting(let error):
                 self.handleListenerFailure(error, description: "\(error)")
             default:
@@ -122,10 +125,14 @@ final class ProxyServer {
         listener = nil
         guard !stopped else { return }
         if case .posix(.EADDRINUSE)? = error {
-            // Usually the previous listener (after Stop, then Start) is still
-            // shutting down. Try again shortly without changing modes.
-            onState?(.failed("Port \(port) is busy"))
-            queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+            // Another app on the phone (or our own previous listener that is
+            // still shutting down) holds this port: move on to the next one.
+            let busy = port
+            portIndex = (portIndex + 1) % Self.candidatePorts.count
+            log("Port \(busy) is in use on this iPhone; trying port \(port).")
+            onState?(.failed("Port \(busy) is busy, trying \(port)"))
+            let delay: TimeInterval = portIndex == 0 ? 3 : 0.2 // pause after trying them all
+            queue.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.startListener()
             }
             return
