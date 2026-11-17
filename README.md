@@ -162,6 +162,10 @@ A free Apple ID can have at most 3 sideloaded apps installed at the same time.
   41080, or the next free port up to 41089 if another app holds it. (1080 is avoided:
   proxy and VPN apps on iPhones commonly take it.) `ProxySession.swift` speaks SOCKS5 and
   HTTP proxy and opens outgoing connections with `requiredInterfaceType = .cellular`.
+  Many US carriers' cellular networks are IPv6-only, and there a cellular-pinned
+  connection can't reach a raw IPv4 address. `Nat64.swift` finds the carrier's NAT64
+  prefix (RFC 7050) and rewrites such addresses into their IPv6 form. Full mode needs this
+  because tun2socks only knows IP addresses.
 - **PC:** ModemBridge asks Apple Mobile Device Service (`127.0.0.1:27015`) for a connection
   to the app, finding its port by probing 41080-41089, and exposes it on `127.0.0.1:1080`. In full mode, tun2socks
   creates a `ModemTether` network adapter, Windows sends all traffic to it, and tun2socks
