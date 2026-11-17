@@ -21,8 +21,30 @@ PC apps ──> ModemBridge (Windows) ──USB──> Modem app (iPhone) ──
 | Windows PC | Windows 10 or 11 |
 | Apple ID | Your normal, **free** Apple ID. No developer program needed. |
 | GitHub account | Free. GitHub builds the iPhone app on one of its Macs. |
-| iTunes for Windows | Download it from [apple.com/itunes](https://www.apple.com/itunes/), **not** the Microsoft Store version. It provides the USB link to the iPhone, and Sideloadly needs it. |
+| iTunes and iCloud for Windows | The **apple.com (web) versions**, not the Microsoft Store ones. iTunes provides the USB link to the iPhone; Sideloadly needs both. |
 | Sideloadly | Free, from [sideloadly.io](https://sideloadly.io). It signs the app with your Apple ID and installs it. |
+
+`windows\install-prereqs.ps1` installs all of it in one administrator window. Open PowerShell
+**as administrator** in the Modem folder and run:
+
+```
+powershell -ExecutionPolicy Bypass -File .\windows\install-prereqs.ps1
+```
+
+It installs, through winget:
+
+- **iTunes**;
+- **Apple Mobile Device Support**, the USB link to the iPhone, which winget's iTunes package
+  leaves out;
+- **iCloud (Legacy)**, the web version Sideloadly wants.
+
+Sideloadly itself comes straight from sideloadly.io, because its winget entry is out of date.
+Its installer is not code-signed by its publisher. If the Microsoft Store versions of iTunes
+or iCloud are installed, uninstall them first.
+
+Apple Mobile Device Support also installs Apple's USB tethering driver. If Personal Hotspot
+is on, Windows will use it over the cable too. Modem works whether Personal Hotspot is on or
+off.
 
 ## One-time setup
 
@@ -39,7 +61,7 @@ To rebuild by hand: **Actions**, then **Build iPhone app**, then **Run workflow*
 
 ### 2. Install it on the iPhone with Sideloadly
 
-1. Install iTunes (apple.com version) and Sideloadly.
+1. Install iTunes, iCloud and Sideloadly as described above.
 2. Plug the iPhone into the PC, unlock it, and tap **Trust**.
 3. Open Sideloadly, drag `Modem-unsigned.ipa` into it, type your Apple ID, and click **Start**.
    Enter your Apple ID password or two-factor code if asked.
@@ -66,9 +88,14 @@ Nothing to do by hand. The first time you double-click `Start Modem.cmd`, it run
 1. Plug the iPhone into the PC and open **Modem**. Tethering starts by itself; the dot turns
    green when the app is ready and cellular data is available.
 2. On the PC, double-click **`Start Modem.cmd`** and click **Yes** on the administrator prompt.
+   Before it changes any Windows network setting, it checks that DNS and a web request
+   actually work through the phone. If they don't, it stops and changes nothing.
 3. Wait for *"All PC traffic now goes out through the iPhone's cellular data."*
 4. To stop, press **Ctrl+C** in that window or just close it. Windows networking goes back
    to normal immediately.
+
+To check the phone path without changing anything (no admin needed), run
+`windows\ModemBridge.exe --self-test`. It prints *Self-test passed* when everything works.
 
 **Leave the Modem app running.** With *Keep running when locked* on (the default), the app
 plays silence so iOS lets it keep working while the screen is locked or you use other apps.
@@ -87,6 +114,9 @@ Apps signed with a free Apple ID stop opening after **7 days**. When that happen
 phone in and run Sideloadly again with the same `.ipa` file. It takes about a minute, and
 your settings are kept. (A paid developer account would stretch this to a year; jailbreaking
 is the only way to avoid it entirely.)
+
+Sideloadly can also do this for you: its auto-refresh option runs in the background on the
+PC and re-signs the app every few days, as long as the PC is on and can reach the phone.
 
 A free Apple ID can have at most 3 sideloaded apps installed at the same time.
 

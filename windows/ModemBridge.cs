@@ -46,6 +46,7 @@ namespace ModemBridge
         public bool NoElevate;
         public bool Elevated;
         public bool RestoreProxy;
+        public bool SelfTest;                   // check the phone path, change nothing, exit
     }
 
     static class Program
@@ -124,17 +125,52 @@ namespace ModemBridge
             UsbMux.Port = Opt.MuxPort;
             var phone = new PhoneLink(Opt);
 
+            if (Opt.SelfTest)
+            {
+                string problem = phone.Probe();
+                if (problem != null)
+                {
+                    Log.Error(problem);
+                    return 1;
+                }
+                Log.Ok("Found the Modem app on the iPhone. Testing DNS and a web request through it...");
+                string failure = new DnsForwarder(phone, Opt.DnsServers, Opt.DnsPort).SelfTest("www.msftconnecttest.com") ?? WebCheck(phone);
+                if (failure != null)
+                {
+                    Log.Error("Self-test failed: " + failure);
+                    return 1;
+                }
+                Log.Ok("Self-test passed: the PC can reach the internet through the iPhone's cellular data. Nothing was changed.");
+                return 0;
+            }
+
             if (!WaitForPhone(phone)) return 0;
 
             var forwarder = new Forwarder(phone, Opt.LocalPort);
             forwarder.Start();
             Log.Ok("Phone proxy available at 127.0.0.1:" + Opt.LocalPort + " (SOCKS5 and HTTP).");
 
+            DnsForwarder dns = null;
             if (Opt.Mode == "full" || Opt.Dns)
             {
-                var dns = new DnsForwarder(phone, Opt.DnsServers, Opt.DnsPort);
+                dns = new DnsForwarder(phone, Opt.DnsServers, Opt.DnsPort);
                 dns.Start();
                 Log.Ok("DNS on 127.0.0.1:" + Opt.DnsPort + " is answered by " + string.Join(", ", Opt.DnsServers) + " through the phone.");
+            }
+
+            if (Opt.Mode == "full" || Opt.Mode == "proxy")
+            {
+                // Prove the whole path works before touching any Windows setting,
+                // so a broken phone link can never take the PC offline.
+                Log.Info("Checking that the phone can reach the internet over cellular...");
+                string failure = (dns != null ? dns.SelfTest("www.msftconnecttest.com") : null) ?? WebCheck(phone);
+                if (failure != null)
+                {
+                    Log.Error("Safety check failed: " + failure);
+                    Log.Error("No Windows network settings were changed.");
+                    return 1;
+                }
+                Log.Ok("Safety check passed: DNS and a web request work through the phone.");
             }
 
             if (Opt.Mode == "full")
@@ -151,6 +187,39 @@ namespace ModemBridge
             Log.Info("Leave this window open. Press Ctrl+C to disconnect.");
             WatchLoop(phone);
             return 0;
+        }
+
+        /// Fetches Windows' own connectivity-test page through the phone. Returns null on success.
+        static string WebCheck(PhoneLink phone)
+        {
+            const string host = "www.msftconnecttest.com";
+            Socket s = null;
+            try
+            {
+                s = phone.Open();
+                s.ReceiveTimeout = 15000;
+                s.SendTimeout = 15000;
+                Socks.Connect(s, host, 80);
+                Net.SendAll(s, Encoding.ASCII.GetBytes(
+                    "GET /connecttest.txt HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n"));
+                var reply = new StringBuilder();
+                var buffer = new byte[4096];
+                int n;
+                while (reply.Length < 16384 && (n = s.Receive(buffer)) > 0)
+                    reply.Append(Encoding.ASCII.GetString(buffer, 0, n));
+                string text = reply.ToString();
+                if (text.StartsWith("HTTP/1.1 200", StringComparison.Ordinal) || text.StartsWith("HTTP/1.0 200", StringComparison.Ordinal))
+                    return null;
+                return "unexpected reply from " + host + ": " + text.Split('\n')[0].Trim();
+            }
+            catch (Exception ex)
+            {
+                return "web request through the phone failed: " + PhoneLink.Explain(ex);
+            }
+            finally
+            {
+                Net.Close(s);
+            }
         }
 
         static bool WaitForPhone(PhoneLink phone)
@@ -299,6 +368,7 @@ namespace ModemBridge
                     case "--no-elevate": o.NoElevate = true; break;
                     case "--elevated": o.Elevated = true; break;
                     case "--restore-proxy": o.RestoreProxy = true; break;
+                    case "--self-test": o.SelfTest = true; break;
                     case "-h":
                     case "--help":
                     case "/?":
@@ -313,6 +383,7 @@ namespace ModemBridge
                 throw new ArgumentException("--mode must be full, proxy or bridge.");
             if (o.DnsServers.Count == 0)
                 throw new ArgumentException("--dns-servers needs at least one address.");
+            if (o.SelfTest) o.Mode = "bridge"; // never needs admin, never changes settings
             return o;
         }
 
@@ -360,6 +431,8 @@ Options:
   --dns-servers a,b    DNS servers reached through the phone (default 1.1.1.1,8.8.8.8)
   --usbmux host:port   Where usbmuxd listens (default 127.0.0.1:27015)
   --tun2socks PATH     Path to tun2socks.exe (default tools\tun2socks.exe)
+  --self-test          Check DNS and a web request through the phone, change
+                       nothing, and exit (0 = works)
   --restore-proxy      Put back the Windows proxy setting saved by proxy mode
   --no-elevate         Fail instead of asking for admin rights
 ");
@@ -429,13 +502,18 @@ Options:
             }
         }
 
+        const string AppNotAnswering =
+            "The iPhone is connected, but the Modem app is not answering. Open Modem on the iPhone and make sure tethering is on.";
+
         /// Returns null when the app answers a SOCKS5 greeting, else a human-readable problem.
         public string Probe()
         {
             Socket s = null;
+            bool opened = false;
             try
             {
                 s = Open();
+                opened = true;
                 s.ReceiveTimeout = 5000;
                 s.SendTimeout = 5000;
                 Net.SendAll(s, new byte[] { 5, 1, 0 });
@@ -448,6 +526,10 @@ Options:
             {
                 if (opt.DirectHost != null && ex is SocketException)
                     return "Nothing is listening at " + opt.DirectHost + ":" + opt.DirectPort + ".";
+                // Apple's Windows service reports the USB connection as made even
+                // when nothing listens on the phone, then closes it straight away.
+                if (opened && (ex is IOException || ex is SocketException))
+                    return AppNotAnswering;
                 return Explain(ex);
             }
             finally
@@ -463,7 +545,7 @@ Options:
             if (mux != null)
             {
                 if (mux.Code == UsbMuxException.ConnectionRefused)
-                    return "The iPhone is connected, but the Modem app is not answering. Open Modem on the iPhone and make sure tethering is on.";
+                    return AppNotAnswering;
                 if (mux.Code == UsbMuxException.BadDevice)
                     return "The iPhone was disconnected. Plug it back in.";
                 return "USB connection to the iPhone failed (usbmux error " + mux.Code + ").";
@@ -1010,6 +1092,24 @@ Options:
             }
             Log.Throttled("dns", "DNS lookup failed: " + PhoneLink.Explain(last));
             return ServerFailure(query);
+        }
+
+        /// Looks up `name` through the phone. Returns null if it resolves.
+        public string SelfTest(string name)
+        {
+            var query = new List<byte> { 0x4D, 0x4F, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0 }; // id, RD, 1 question
+            foreach (var label in name.Split('.'))
+            {
+                query.Add((byte)label.Length);
+                query.AddRange(Encoding.ASCII.GetBytes(label));
+            }
+            query.AddRange(new byte[] { 0, 0, 1, 0, 1 }); // end of name, type A, class IN
+            byte[] answer = Resolve(query.ToArray());
+            int code = answer[3] & 0x0F;
+            int count = (answer[6] << 8) | answer[7];
+            if (code != 0) return "DNS lookup of " + name + " through the phone failed (DNS error " + code + ").";
+            if (count == 0) return "DNS lookup of " + name + " through the phone returned no addresses.";
+            return null;
         }
 
         Socket OpenTo(string server)
