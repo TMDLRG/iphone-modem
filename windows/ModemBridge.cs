@@ -37,7 +37,7 @@ namespace ModemBridge
         public int PhonePort;                   // 0 = find the app's port automatically
         public bool Dns;                        // DNS forwarder (always on in full mode)
         public int DnsPort = 53;
-        public List<string> DnsServers = new List<string> { "1.1.1.1", "8.8.8.8" };
+        public List<string> DnsServers = new List<string> { "one.one.one.one", "dns.google" }; // names work on IPv6-only cellular too
         public string MuxHost = "127.0.0.1";
         public int MuxPort = 27015;
         public string DirectHost;               // testing: skip usbmux and connect here instead
@@ -429,7 +429,8 @@ Options:
                        automatically among 41080-41089)
   --dns                Also run the DNS forwarder (always on in full mode)
   --dns-port N         Local DNS port (default 53)
-  --dns-servers a,b    DNS servers reached through the phone (default 1.1.1.1,8.8.8.8)
+  --dns-servers a,b    DNS servers reached through the phone
+                       (default one.one.one.one,dns.google)
   --usbmux host:port   Where usbmuxd listens (default 127.0.0.1:27015)
   --tun2socks PATH     Path to tun2socks.exe (default tools\tun2socks.exe)
   --self-test          Check DNS and a web request through the phone, change

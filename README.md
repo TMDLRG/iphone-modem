@@ -125,7 +125,7 @@ A free Apple ID can have at most 3 sideloaded apps installed at the same time.
 - **TCP only.** UDP can't cross Apple's USB link, so things that need UDP, such as some games
   and some voice or video calls, won't work. Web browsers quietly fall back from HTTP/3 to TCP,
   so websites are fine. DNS is the exception: ModemBridge converts it to DNS-over-TCP and sends
-  it through the phone to 1.1.1.1 (backup 8.8.8.8).
+  it through the phone to Cloudflare DNS (one.one.one.one), with Google DNS (dns.google) as backup.
 - **IPv4 on the PC side.** The phone itself can still reach IPv6 servers.
 - **Speed** is whatever your cellular connection gives you.
 - **Carrier rules.** Some plans forbid or cap tethering. Using this may breach your plan's
